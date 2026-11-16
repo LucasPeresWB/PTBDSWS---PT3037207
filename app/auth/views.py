@@ -1,5 +1,5 @@
 from flask import (
-    render_template, redirect, url_for, flash, current_app
+    render_template, redirect, url_for, flash, current_app, request
 )
 from flask_login import (
     login_user, logout_user, login_required, current_user
@@ -21,7 +21,18 @@ from itsdangerous import (
     URLSafeTimedSerializer, BadSignature, SignatureExpired
 )
 
-from app.email import send_password_reset_email
+from app.email import send_password_reset_email, send_confirmation_email
+
+@auth.before_app_request
+def verificar_confirmacao():
+    if current_user.is_authenticated and not current_user.confirmed:
+        if request.endpoint and (
+            request.endpoint.startswith('auth.')
+            or request.endpoint == 'static'
+        ):
+            return
+
+        return redirect(url_for('auth.unconfirmed'))
 
 
 @auth.route('/register', methods=['GET', 'POST'])
@@ -39,7 +50,20 @@ def register():
         db.session.add(user)
         db.session.commit()
 
-        flash('Cadastro realizado com sucesso. Agora você pode entrar.')
+        token = user.generate_confirmation_token()
+
+        confirm_url = url_for(
+            'auth.confirm',
+            token=token,
+            _external=True
+        )
+
+        send_confirmation_email(user.email, confirm_url)
+
+        flash(
+            'Cadastro realizado! Verifique seu e-mail para confirmar sua conta.'
+        )
+
         return redirect(url_for('auth.login'))
 
     return render_template('auth/register.html', form=form)
@@ -55,6 +79,12 @@ def login():
         ).first()
 
         if user is not None and user.verify_password(form.password.data):
+
+            if not user.confirmed:
+                login_user(user, remember=form.remember_me.data)
+                flash('Você precisa confirmar sua conta para acessar o site.')
+                return redirect(url_for('auth.unconfirmed'))
+
             login_user(user, remember=form.remember_me.data)
             return redirect(url_for('main.index'))
 
@@ -62,6 +92,48 @@ def login():
 
     return render_template('auth/login.html', form=form)
 
+@auth.route('/resend-confirmation')
+@login_required
+def resend_confirmation():
+    if current_user.confirmed:
+        return redirect(url_for('main.index'))
+
+    token = current_user.generate_confirmation_token()
+
+    confirm_url = url_for(
+        'auth.confirm',
+        token=token,
+        _external=True
+    )
+
+    send_confirmation_email(current_user.email, confirm_url)
+
+    flash('Um novo e-mail de confirmação foi enviado!')
+
+    return redirect(url_for('auth.unconfirmed'))
+
+@auth.route('/unconfirmed')
+@login_required
+def unconfirmed():
+    if current_user.confirmed:
+        return redirect(url_for('main.index'))
+
+    return render_template('auth/unconfirmed.html')
+
+@auth.route('/confirm/<token>')
+@login_required
+def confirm(token):
+    if current_user.confirmed:
+        flash('Sua conta já foi confirmada.')
+        return redirect(url_for('main.index'))
+
+    if current_user.confirm(token):
+        db.session.commit()
+        flash('Sua conta foi confirmada com sucesso!')
+    else:
+        flash('O link de confirmação é inválido ou expirou.')
+
+    return redirect(url_for('main.index'))
 
 @auth.route('/logout')
 @login_required

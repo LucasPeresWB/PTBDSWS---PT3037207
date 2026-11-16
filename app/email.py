@@ -170,3 +170,32 @@ def send_password_reset_email(recipient, reset_url):
     thread.start()
 
     return thread
+
+def send_confirmation_email(recipient, confirm_url):
+    app = current_app._get_current_object()
+
+    subject = app.config['FLASKY_MAIL_SUBJECT_PREFIX'] + ' Confirmação de conta'
+
+    html_content = f"""
+    <h3>Confirmação de conta</h3>
+    <p>Seu cadastro foi realizado com sucesso!</p>
+    <p>Para confirmar sua conta, acesse o link abaixo:</p>
+    <p><a href="{confirm_url}">Confirmar minha conta</a></p>
+    <p>Se o link não funcionar, copie este endereço:</p>
+    <p>{confirm_url}</p>
+    <p>Se você não realizou esse cadastro, ignore este e-mail.</p>
+    """
+
+    salvar_email(
+        de='Flasky',
+        destinatarios=[recipient],
+        assunto=subject,
+        texto=f'Link para confirmar a conta: {confirm_url}'
+    )
+
+    thread = Thread(
+        target=send_async_email,
+        args=[app, [recipient], subject, html_content]
+    )
+    thread.start()
+    return thread
